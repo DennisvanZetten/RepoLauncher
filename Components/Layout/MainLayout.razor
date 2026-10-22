@@ -1,0 +1,15 @@
+﻿@inherits LayoutComponentBase
+
+<MudThemeProvider IsDarkMode="true" />
+<MudPopoverProvider />
+<MudDialogProvider />
+<MudSnackbarProvider />
+<MudLayout>
+    <MudAppBar Elevation="0" Color="Color.Surface" Dense="true">
+        <MudIcon Icon="@Icons.Material.Filled.Terminal" Color="Color.Primary" Class="mr-3" />
+        <MudText Typo="Typo.h6">Repo Launcher</MudText>
+    </MudAppBar>
+    <MudMainContent>
+        @Body
+    </MudMainContent>
+</MudLayout>

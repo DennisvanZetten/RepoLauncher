@@ -1,0 +1,144 @@
+@page "/"
+@inject LauncherSettingsService SettingsService
+@inject PowerShellLauncher PowerShellLauncher
+@inject ISnackbar Snackbar
+
+<PageTitle>Repo Launcher</PageTitle>
+
+<MudContainer MaxWidth="MaxWidth.Large" Class="py-8">
+    <MudStack Spacing="5">
+        <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween">
+            <div>
+                <MudText Typo="Typo.h4" Class="fw-bold">Repo Launcher</MudText>
+                <MudText Typo="Typo.body1" Color="Color.Secondary">Start OpenCode in je repositories.</MudText>
+            </div>
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Large"
+                       StartIcon="@Icons.Material.Filled.RocketLaunch" Disabled="@(!_settings.Repositories.Any(r => r.IsActive))"
+                       OnClick="LaunchAll">
+                Start alle actief
+            </MudButton>
+        </MudStack>
+
+        <MudPaper Class="pa-5" Outlined="true" Elevation="0">
+            <MudStack Spacing="3">
+                <MudText Typo="Typo.h6">Startinstellingen</MudText>
+                <MudGrid>
+                    <MudItem xs="12" md="6">
+                        <MudTextField @bind-Value="_settings.PowerShellExecutable" Label="PowerShell executable"
+                                      HelperText="Bijvoorbeeld pwsh.exe of powershell.exe" Variant="Variant.Outlined" />
+                    </MudItem>
+                    <MudItem xs="12" md="6">
+                        <MudTextField @bind-Value="_settings.ToolCommand" Label="Tool / commando"
+                                      HelperText="Bijvoorbeeld opencode" Variant="Variant.Outlined" />
+                    </MudItem>
+                </MudGrid>
+            </MudStack>
+        </MudPaper>
+
+        <MudPaper Class="pa-5" Outlined="true" Elevation="0">
+            <MudStack Spacing="3">
+                <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween">
+                    <div>
+                        <MudText Typo="Typo.h6">Repositories</MudText>
+                        <MudText Typo="Typo.body2" Color="Color.Secondary">@ActiveCount actief van @_settings.Repositories.Count</MudText>
+                    </div>
+                    <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Add" OnClick="AddRepository">
+                        Repository toevoegen
+                    </MudButton>
+                </MudStack>
+
+                @if (_settings.Repositories.Count == 0)
+                {
+                    <MudAlert Severity="Severity.Info" Variant="Variant.Outlined">
+                        Voeg een repositorymap toe om te beginnen.
+                    </MudAlert>
+                }
+                else
+                {
+                    <MudStack Spacing="2">
+                        @foreach (var repository in _settings.Repositories)
+                        {
+                            <MudPaper @key="repository" Class="pa-3" Outlined="true" Elevation="0">
+                                <MudGrid Spacing="2">
+                                    <MudItem xs="12" sm="1">
+                                        <MudSwitch @bind-Value="repository.IsActive" Color="Color.Primary" />
+                                    </MudItem>
+                                    <MudItem xs="12" sm="4">
+                                        <MudTextField @bind-Value="repository.Name" Label="Naam" Variant="Variant.Outlined" Margin="Margin.Dense" />
+                                    </MudItem>
+                                    <MudItem xs="12" sm="6">
+                                        <MudTextField @bind-Value="repository.Path" Label="Pad" Variant="Variant.Outlined" Margin="Margin.Dense" />
+                                    </MudItem>
+                                    <MudItem xs="12" sm="1" Class="d-flex justify-end">
+                                        <MudIconButton Icon="@Icons.Material.Filled.DeleteOutline" Color="Color.Error"
+                                                       aria-label="Repository verwijderen" OnClick="@(() => RemoveRepository(repository))" />
+                                    </MudItem>
+                                </MudGrid>
+                            </MudPaper>
+                        }
+                    </MudStack>
+                }
+            </MudStack>
+        </MudPaper>
+
+        <MudStack Row="true" Justify="Justify.FlexEnd" AlignItems="AlignItems.Center" Spacing="2">
+            <MudText Typo="Typo.caption" Color="Color.Secondary">Instellingen worden lokaal opgeslagen.</MudText>
+            <MudButton Variant="Variant.Filled" Color="Color.Secondary" StartIcon="@Icons.Material.Filled.Save"
+                       OnClick="SaveSettings">Instellingen opslaan</MudButton>
+        </MudStack>
+    </MudStack>
+</MudContainer>
+
+@code {
+    private LauncherSettings _settings = new();
+    private int ActiveCount => _settings.Repositories.Count(r => r.IsActive);
+
+    protected override async Task OnInitializedAsync()
+    {
+        _settings = await SettingsService.LoadAsync();
+    }
+
+    private void AddRepository()
+    {
+        _settings.Repositories.Add(new RepositoryEntry { Name = "Nieuwe repository" });
+    }
+
+    private void RemoveRepository(RepositoryEntry repository)
+    {
+        _settings.Repositories.Remove(repository);
+    }
+
+    private async Task SaveSettings()
+    {
+        await SettingsService.SaveAsync(_settings);
+        Snackbar.Add("Instellingen opgeslagen.", Severity.Success);
+    }
+
+    private void LaunchAll()
+    {
+        var activeRepositories = _settings.Repositories.Where(r => r.IsActive).ToList();
+        var invalidRepositories = activeRepositories
+            .Where(repository => !Directory.Exists(repository.Path))
+            .Select(repository => string.IsNullOrWhiteSpace(repository.Name) ? repository.Path : repository.Name)
+            .ToList();
+
+        try
+        {
+            var startedCount = PowerShellLauncher.LaunchAll(_settings, activeRepositories);
+            if (startedCount == 0)
+            {
+                Snackbar.Add("Geen geldige repositorypaden om te starten.", Severity.Warning);
+                return;
+            }
+
+            if (invalidRepositories.Count == 0)
+                Snackbar.Add($"Windows Terminal gestart met {startedCount} tabblad(en).", Severity.Success);
+            else
+                Snackbar.Add($"{startedCount} tabblad(en) gestart. Overgeslagen (pad bestaat niet): {string.Join(", ", invalidRepositories)}", Severity.Warning, config => config.VisibleStateDuration = 10000);
+        }
+        catch (Exception exception)
+        {
+            Snackbar.Add($"Windows Terminal starten is mislukt: {exception.Message}", Severity.Error, config => config.VisibleStateDuration = 10000);
+        }
+    }
+}
