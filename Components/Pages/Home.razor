@@ -1,6 +1,7 @@
 @page "/"
 @inject LauncherSettingsService SettingsService
 @inject PowerShellLauncher PowerShellLauncher
+@inject GitBranchService GitBranchService
 @inject ISnackbar Snackbar
 
 <PageTitle>Repo Launcher</PageTitle>
@@ -45,6 +46,10 @@
                     <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Add" OnClick="AddRepository">
                         Repository toevoegen
                     </MudButton>
+                    <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Refresh"
+                               OnClick="RefreshBranches" Disabled="@_isRefreshingBranches">
+                        Branches vernieuwen
+                    </MudButton>
                 </MudStack>
 
                 @if (_settings.Repositories.Count == 0)
@@ -73,6 +78,11 @@
                                         <MudIconButton Icon="@Icons.Material.Filled.DeleteOutline" Color="Color.Error"
                                                        aria-label="Repository verwijderen" OnClick="@(() => RemoveRepository(repository))" />
                                     </MudItem>
+                                    <MudItem xs="12">
+                                        <MudText Typo="Typo.caption" Color="Color.Secondary">
+                                            @BranchLabel(repository)
+                                        </MudText>
+                                    </MudItem>
                                 </MudGrid>
                             </MudPaper>
                         }
@@ -92,10 +102,13 @@
 @code {
     private LauncherSettings _settings = new();
     private int ActiveCount => _settings.Repositories.Count(r => r.IsActive);
+    private readonly Dictionary<RepositoryEntry, GitBranchInfo> _branches = [];
+    private bool _isRefreshingBranches;
 
     protected override async Task OnInitializedAsync()
     {
         _settings = await SettingsService.LoadAsync();
+        await RefreshBranches();
     }
 
     private void AddRepository()
@@ -106,11 +119,47 @@
     private void RemoveRepository(RepositoryEntry repository)
     {
         _settings.Repositories.Remove(repository);
+        _branches.Remove(repository);
+    }
+
+    private async Task RefreshBranches()
+    {
+        if (_isRefreshingBranches)
+            return;
+
+        _isRefreshingBranches = true;
+        try
+        {
+            var results = await Task.WhenAll(_settings.Repositories.Select(async repository =>
+                (Repository: repository, Branch: await GitBranchService.GetCurrentBranchAsync(repository.Path))));
+
+            _branches.Clear();
+            foreach (var result in results)
+                _branches[result.Repository] = result.Branch;
+        }
+        finally
+        {
+            _isRefreshingBranches = false;
+        }
+    }
+
+    private string BranchLabel(RepositoryEntry repository)
+    {
+        if (_isRefreshingBranches)
+            return "Branch: ophalen...";
+
+        if (!_branches.TryGetValue(repository, out var branchInfo))
+            return "Branch: nog niet opgehaald";
+
+        return branchInfo.Branch is not null
+            ? $"Branch: {branchInfo.Branch}"
+            : $"Branch: {branchInfo.Status}";
     }
 
     private async Task SaveSettings()
     {
         await SettingsService.SaveAsync(_settings);
+        await RefreshBranches();
         Snackbar.Add("Instellingen opgeslagen.", Severity.Success);
     }
 
